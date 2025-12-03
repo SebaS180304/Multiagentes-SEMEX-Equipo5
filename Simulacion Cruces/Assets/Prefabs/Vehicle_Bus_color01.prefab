@@ -12,9 +12,10 @@ GameObject:
   - component: {fileID: 2753792782557795006}
   - component: {fileID: 88019631628869435}
   - component: {fileID: 7001522616292096128}
-  m_Layer: 0
+  - component: {fileID: 8674379563785622234}
+  m_Layer: 3
   m_Name: Vehicle_Bus_color01
-  m_TagString: Untagged
+  m_TagString: Car
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
@@ -29,7 +30,7 @@ Transform:
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 160.2, y: 1, z: -21.3}
-  m_LocalScale: {x: 2, y: 2, z: 2}
+  m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 0}
@@ -102,5 +103,32 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: b1ff0ddc869421445a0246ab603bd7b6, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::VehicleController
-  speed: 8
-  rotationSpeed: 5
+  vehicleLayer:
+    serializedVersion: 2
+    m_Bits: 8
+  sensorHeightOffset: 0.5
+  baseSpeed: 1
+  baseRotationSpeed: 1
+  stopDistanceToLight: 6
+--- !u!64 &8674379563785622234
+MeshCollider:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2406159491901032795}
+  m_Material: {fileID: 0}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_LayerOverridePriority: 0
+  m_IsTrigger: 1
+  m_ProvidesContacts: 0
+  m_Enabled: 1
+  serializedVersion: 5
+  m_Convex: 1
+  m_CookingOptions: 30
+  m_Mesh: {fileID: 4300000, guid: 0d82ae0493e1c264bad0588fde0a3d8a, type: 3}

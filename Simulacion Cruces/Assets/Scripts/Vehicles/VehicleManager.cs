@@ -22,6 +22,14 @@ public class VehicleManager : MonoBehaviour
 {
     public static VehicleManager Instance { get; private set; }
 
+    [Header("Interacciones entre vehículos")]
+    [Tooltip("Distancia mínima que se debe mantener con el coche de adelante.")]
+    public float safeHeadwayDistance = 4f;
+
+    [Tooltip("Radio para checar si 'quepo' al avanzar hacia el siguiente punto.")]
+    public float mergeCheckRadius = 1.5f;
+
+
     [Header("Spawn global")]
     public bool autoSpawn = true;
     public float minSpawnInterval = 2f;   // segundos
@@ -31,8 +39,17 @@ public class VehicleManager : MonoBehaviour
     public int maxActiveVehicles = 50;
     public int minActiveVehicles = 0;     // por ahora solo informativo
 
+    private List<VehicleController> activeVehicles = new List<VehicleController>();
+
+
     [SerializeField, Tooltip("Solo lectura, vehículos actuales")]
     private int currentActiveVehicles = 0;
+    public int CurrentActiveVehicles => currentActiveVehicles;
+
+    [SerializeField, Tooltip("Solo lectura, vehículos esperando en semáforo")]
+    private int currentWaitingVehicles = 0;
+    public int CurrentWaitingVehicles => currentWaitingVehicles;
+
 
     [Header("Multiplicadores globales de velocidad")]
     public float globalSpeedMultiplier = 1f;
@@ -83,14 +100,53 @@ public class VehicleManager : MonoBehaviour
     //   API para VehicleController
     // =========================================================
 
-    public void RegisterVehicle(VehicleController vc)
+    public void RegisterVehicle(VehicleController v)
     {
-        currentActiveVehicles++;
+        if (!activeVehicles.Contains(v))
+            activeVehicles.Add(v);
+
+        currentActiveVehicles = activeVehicles.Count;
     }
 
-    public void UnregisterVehicle(VehicleController vc)
+    public void UnregisterVehicle(VehicleController v)
     {
-        currentActiveVehicles = Mathf.Max(0, currentActiveVehicles - 1);
+        if (activeVehicles.Remove(v))
+            currentActiveVehicles = activeVehicles.Count;
+    }
+
+    // ====================================
+    //  Método para resetear la simulación
+    // ====================================
+
+    public void ResetSimulation()
+    {
+        // Destruir todos los coches actuales
+        var copy = new List<VehicleController>(activeVehicles);
+        foreach (var v in copy)
+        {
+            if (v != null)
+                Destroy(v.gameObject);
+        }
+
+        activeVehicles.Clear();
+        currentActiveVehicles = 0;
+        currentWaitingVehicles = 0;
+    }
+
+
+    // =======================
+    //  Espera en semáforos
+    // =======================
+
+    public void RegisterWaitingVehicle(string lightId)
+    {
+        // Por ahora solo contamos total; si luego quieres por semáforo, lo ampliamos
+        currentWaitingVehicles++;
+    }
+
+    public void UnregisterWaitingVehicle(string lightId)
+    {
+        currentWaitingVehicles = Mathf.Max(0, currentWaitingVehicles - 1);
     }
 
     // =========================================================

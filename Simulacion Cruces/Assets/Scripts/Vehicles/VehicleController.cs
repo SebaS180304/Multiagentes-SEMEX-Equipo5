@@ -2,13 +2,124 @@ using UnityEngine;
 
 public class VehicleController : MonoBehaviour
 {
+    [Header("Interacciones con otros vehículos")]
+    [Tooltip("Layer donde están los coches (ej. 'Vehicle').")]
+    public LayerMask vehicleLayer;
+
+    [Tooltip("Offset vertical para los raycasts hacia adelante.")]
+    public float sensorHeightOffset = 0.5f;
+
     [Header("Movimiento base")]
-    private float baseSpeed = 1f;          // m/s
-    private float baseRotationSpeed = 1f;  // giro
+    public float baseSpeed = 8f;
+    public float baseRotationSpeed = 5f;
+
+    [Header("Semáforos")]
+    [Tooltip("Distancia al punto de alto a la cual el vehículo se detiene si el semáforo está en rojo/amarillo.")]
+    public float stopDistanceToLight = 2f;
+
+    // Collider del coche
+    private Collider vehicleCollider;
+
+    // Datos del collider para cálculos
+    private Vector3 colliderLocalCenter;
+    private Vector3 colliderHalfExtents;
+
+    private bool isWaiting = false;
+    private string waitingLightId = null;
+
+    // Espera por otro vehículo
+    private bool isBlockedByVehicle = false;
 
     private Transform[] route;
     private int currentIndex = 0;
     private bool initialized = false;
+
+    /// Revisa si en la posición 'nextPosition' hay espacio para avanzar
+    /// sin chocarse con otro carro. Usa un OverlapSphere.
+    private bool AhiQuepo(Vector3 nextPosition)
+    {
+        // Si no tenemos collider, usamos el método viejito con esfera
+        float fallbackRadius = VehicleManager.Instance != null
+            ? VehicleManager.Instance.mergeCheckRadius
+            : 1.5f;
+
+        if (vehicleCollider == null)
+        {
+            Collider[] hitsFallback = Physics.OverlapSphere(nextPosition, fallbackRadius, vehicleLayer);
+
+            foreach (var hit in hitsFallback)
+            {
+                if (hit.transform.root == transform.root)
+                    continue;
+
+                return false;
+            }
+
+            return true;
+        }
+
+        // Con collider: usamos una OverlapBox con el tamaño real del coche
+        Quaternion rot = transform.rotation;
+
+        // Centro futuro del collider: el coche en nextPosition con su offset de centro
+        Vector3 futureCenter = nextPosition + rot * colliderLocalCenter;
+
+        Collider[] hits = Physics.OverlapBox(futureCenter, colliderHalfExtents, rot, vehicleLayer);
+
+        foreach (var hit in hits)
+        {
+            if (hit.transform.root == transform.root)
+                continue;
+
+            // Hay otro coche ocupando el volumen donde estaría nuestro collider
+            return false;
+        }
+
+        return true;
+    }
+
+
+    /// Detecta si hay un vehículo adelante en la dirección de marcha
+    /// a una cierta distancia.
+    private bool HayVehiculoAdelante(float distance)
+    {
+        if (distance <= 0f)
+            return false;
+
+        Vector3 origin;
+
+        if (vehicleCollider != null)
+        {
+            // Centro del collider en mundo
+            Vector3 worldCenter = transform.TransformPoint(colliderLocalCenter);
+
+            // Punto aproximado del "parachoques" delantero
+            origin = worldCenter + transform.forward * colliderHalfExtents.z;
+        }
+        else
+        {
+            // Fallback: centro del coche si no encontramos collider
+            origin = transform.position;
+        }
+
+        // Un pelín arriba para evitar tocar el suelo
+        origin += Vector3.up * sensorHeightOffset;
+
+        Vector3 direction = transform.forward;
+
+        // SphereCast desde el frente real del coche
+        if (Physics.SphereCast(origin, 0.5f, direction, out RaycastHit hit, distance, vehicleLayer))
+        {
+            if (hit.collider != null && hit.collider.transform.root != transform.root)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+
 
     public void SetRoute(Transform[] routePoints)
     {
@@ -18,7 +129,6 @@ public class VehicleController : MonoBehaviour
 
         if (initialized)
         {
-            // Colocar el coche en el primer punto
             transform.position = route[0].position;
 
             if (route.Length > 1)
@@ -30,26 +140,47 @@ public class VehicleController : MonoBehaviour
         }
     }
 
+    private void Awake()
+    {
+
+        vehicleCollider = GetComponentInChildren<Collider>();
+
+        if (vehicleCollider != null)
+        {
+            // Centro del collider en espacio local del coche
+            colliderLocalCenter = transform.InverseTransformPoint(vehicleCollider.bounds.center);
+
+            // Mitad de cada dimensión del collider (tamaño / 2)
+            colliderHalfExtents = vehicleCollider.bounds.extents;
+        }
+    }
+
+
     private void Start()
     {
-        // Registrar vehículo en el manager global (si existe)
         if (VehicleManager.Instance != null)
             VehicleManager.Instance.RegisterVehicle(this);
     }
 
     private void OnDestroy()
     {
-        // Desregistrar
         if (VehicleManager.Instance != null)
+        {
             VehicleManager.Instance.UnregisterVehicle(this);
+
+            if (isWaiting)
+                VehicleManager.Instance.UnregisterWaitingVehicle(waitingLightId);
+        }
     }
+
+
 
     private void Update()
     {
         if (!initialized || route == null || route.Length == 0)
             return;
 
-        // Obtener multiplicadores globales (por si el manager está ausente en pruebas)
+        // Multiplicadores globales de velocidad/rotación
         float speedMultiplier = 1f;
         float rotationMultiplier = 1f;
 
@@ -62,7 +193,7 @@ public class VehicleController : MonoBehaviour
         float speed = baseSpeed * speedMultiplier;
         float rotationSpeed = baseRotationSpeed * rotationMultiplier;
 
-        // Si ya llegamos al final de la ruta
+        // Fin de ruta
         if (currentIndex >= route.Length)
         {
             Destroy(gameObject);
@@ -71,15 +202,93 @@ public class VehicleController : MonoBehaviour
 
         Transform target = route[currentIndex];
         Vector3 toTarget = target.position - transform.position;
+
+        // ================================
+        // 1) Lógica de semáforo
+        // ================================
+        Waypoint wp = target.GetComponent<Waypoint>();
+        bool mustStopForLight = false;
+        string targetLightId = null;
+
+        if (wp != null &&
+            wp.isStopPoint &&
+            !string.IsNullOrEmpty(wp.trafficLightId))
+        {
+            targetLightId = wp.trafficLightId;
+
+            var lightState = TrafficLightManager.GetLightStateGlobal(targetLightId);
+
+            if ((lightState == TrafficLightState.Red ||
+                lightState == TrafficLightState.Yellow) &&
+                toTarget.magnitude <= stopDistanceToLight)
+            {
+                mustStopForLight = true;
+            }
+        }
+
+        // Gestionar estado de espera por semáforo
+        if (mustStopForLight)
+        {
+            if (!isWaiting)
+            {
+                isWaiting = true;
+                waitingLightId = targetLightId;
+
+                if (VehicleManager.Instance != null)
+                    VehicleManager.Instance.RegisterWaitingVehicle(waitingLightId);
+            }
+
+            return; // no avanzamos este frame
+        }
+        else
+        {
+            if (isWaiting)
+            {
+                isWaiting = false;
+
+                if (VehicleManager.Instance != null)
+                    VehicleManager.Instance.UnregisterWaitingVehicle(waitingLightId);
+
+                waitingLightId = null;
+            }
+        }
+
+        // ================================
+        // 2) Lógica de coche adelante
+        // ================================
+        float safeDistance = VehicleManager.Instance != null
+            ? VehicleManager.Instance.safeHeadwayDistance
+            : 4f;
+
+        if (HayVehiculoAdelante(safeDistance))
+        {
+            isBlockedByVehicle = true;
+            return; // hay alguien enfrente, no nos movemos
+        }
+        else
+        {
+            isBlockedByVehicle = false;
+        }
+
+        // ================================
+        // 3) Movimiento + AhiQuepo
+        // ================================
         float distanceThisFrame = speed * Time.deltaTime;
 
         if (toTarget.magnitude <= distanceThisFrame)
         {
-            // Llegamos al punto
-            transform.position = target.position;
+            // Estamos a punto de llegar al punto objetivo
+            Vector3 candidatePos = target.position;
+
+            // Revisar si 'quepo' en el punto antes de avanzar
+            if (!AhiQuepo(candidatePos))
+            {
+                return; // hay otro coche ocupando el espacio, esperamos
+            }
+
+            transform.position = candidatePos;
             currentIndex++;
 
-            // Ajustar dirección hacia el siguiente
             if (currentIndex < route.Length)
             {
                 Vector3 nextDir = (route[currentIndex].position - transform.position).normalized;
@@ -89,11 +298,18 @@ public class VehicleController : MonoBehaviour
         }
         else
         {
-            // Avanzar hacia el punto
+            // Movimiento parcial hacia el target
             Vector3 moveDir = toTarget.normalized;
-            transform.position += moveDir * distanceThisFrame;
+            Vector3 candidatePos = transform.position + moveDir * distanceThisFrame;
 
-            // Girar suavemente hacia dirección de movimiento
+            // Revisar si 'quepo' en la posición siguiente
+            if (!AhiQuepo(candidatePos))
+            {
+                return; // espacio ocupado → esperamos
+            }
+
+            transform.position = candidatePos;
+
             if (moveDir.sqrMagnitude > 0.0001f)
             {
                 Quaternion targetRot = Quaternion.LookRotation(moveDir, Vector3.up);
@@ -101,4 +317,5 @@ public class VehicleController : MonoBehaviour
             }
         }
     }
+
 }
