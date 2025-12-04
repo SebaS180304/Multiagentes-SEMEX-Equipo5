@@ -268,21 +268,28 @@ public class TrafficLightManager : MonoBehaviour
         return chosenDuration;
     }
 
-    // Reward simple: ahora solo minimiza vehículos esperando (global)
-    // Alpha también escala la penalización.
+    /// <summary>
+    /// Recompensa del Q-learning:
+    /// castiga solo la cantidad de vehículos esperando
+    /// en los semáforos controlados por ESTE manager.
+    /// </summary>
     private float ComputeReward()
     {
         if (VehicleManager.Instance != null)
         {
-            float waiting = VehicleManager.Instance.CurrentWaitingVehicles;
+            // Suma de coches esperando en los semáforos de este manager
+            int waitingLocal = VehicleManager.Instance.GetWaitingVehiclesForLights(lightsLocal);
 
-            // Mientras más coches esperando haya, peor. Alpha escala la penalización.
-            float cost = alpha * waiting;
+            // Mientras más cola local haya, peor.
+            // Alpha escala la penalización (también es tasa de aprendizaje).
+            float cost = alpha * waitingLocal;
 
             return -cost;
         }
+
         return 0f;
     }
+
 
 
     private int SelectActionEpsilonGreedy(int state)

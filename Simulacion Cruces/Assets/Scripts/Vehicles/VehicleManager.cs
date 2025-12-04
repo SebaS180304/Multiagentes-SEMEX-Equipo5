@@ -49,7 +49,7 @@ public class VehicleManager : MonoBehaviour
     private int currentWaitingVehicles = 0;
     public int CurrentWaitingVehicles => currentWaitingVehicles;
 
-    // Conteo por semáforo: lightId -> número de coches esperando en ese semáforo
+    // Mapa de lightId -> número de vehículos esperando en ese semáforo
     private Dictionary<string, int> waitingByLight = new Dictionary<string, int>();
 
 
@@ -137,13 +137,11 @@ public class VehicleManager : MonoBehaviour
     }
 
 
+
     // =======================
     //  Espera en semáforos
     // =======================
 
-    /// <summary>
-    /// Registra que un vehículo empezó a esperar en el semáforo con ese ID.
-    /// </summary>
     public void RegisterWaitingVehicle(string lightId)
     {
         currentWaitingVehicles++;
@@ -157,9 +155,6 @@ public class VehicleManager : MonoBehaviour
         waitingByLight[lightId] = count + 1;
     }
 
-    /// <summary>
-    /// Registra que un vehículo dejó de esperar en el semáforo con ese ID.
-    /// </summary>
     public void UnregisterWaitingVehicle(string lightId)
     {
         currentWaitingVehicles = Mathf.Max(0, currentWaitingVehicles - 1);
@@ -171,55 +166,41 @@ public class VehicleManager : MonoBehaviour
         {
             count = Mathf.Max(0, count - 1);
             if (count == 0)
-            {
                 waitingByLight.Remove(lightId);
-            }
             else
-            {
                 waitingByLight[lightId] = count;
-            }
         }
     }
 
-    
-
-    /// <summary>
-    /// Número de vehículos esperando en un semáforo específico.
-    /// </summary>
+    // Cola para UN semáforo
     public int GetWaitingVehiclesForLight(string lightId)
     {
         if (string.IsNullOrEmpty(lightId))
             return 0;
 
-        int count = 0;
+        if (waitingByLight.TryGetValue(lightId, out int count))
+            return count;
 
-        foreach (var v in activeVehicles)
-        {
-            if (v == null) 
-                continue;
-
-            if (v.IsWaiting && v.WaitingLightId == lightId)
-                count++;
-        }
-
-        return count;
+        return 0;
     }
 
-    /// <summary>
-    /// Suma de vehículos esperando en una colección de semáforos.
-    /// </summary>
-    public int GetWaitingVehiclesForLights(IReadOnlyList<TrafficLight> lights)
+    // Cola total para un grupo de semáforos (por si quieres usarlo después)
+    public int GetWaitingVehiclesForLights(System.Collections.Generic.IReadOnlyList<TrafficLight> lights)
     {
-        if (lights == null) return 0;
+        if (lights == null)
+            return 0;
 
         int total = 0;
+
         foreach (var tl in lights)
         {
             if (tl == null) continue;
             total += GetWaitingVehiclesForLight(tl.lightId);
         }
+
         return total;
     }
+
 
     // =========================================================
     //   Configs

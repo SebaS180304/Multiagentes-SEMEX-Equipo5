@@ -141,13 +141,14 @@ public class TrafficLight : MonoBehaviour
         SetState(targetState);
     }
 
-    private void Update()
+        private void Update()
     {
         if (VehicleManager.Instance != null && !string.IsNullOrEmpty(lightId))
             debugQueueCount = VehicleManager.Instance.GetWaitingVehiclesForLight(lightId);
         else
             debugQueueCount = 0;
     }
+
 
 
     private void UpdateVisuals()

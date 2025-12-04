@@ -305,30 +305,54 @@ public class VehicleController : MonoBehaviour
         Vector3 toTarget = target.position - transform.position;
 
         // ================================
-        // 1) Lógica de semáforo
+        // 1) Lógica de semáforo + cola
         // ================================
         Waypoint wp = target.GetComponent<Waypoint>();
-        bool mustStopForLight = false;
+
+        bool underLightControl = false;
         string targetLightId = null;
+        TrafficLightState lightState = TrafficLightState.Green;
 
         if (wp != null &&
             wp.isStopPoint &&
             !string.IsNullOrEmpty(wp.trafficLightId))
         {
+            underLightControl = true;
             targetLightId = wp.trafficLightId;
+            lightState = TrafficLightManager.GetLightStateGlobal(targetLightId);
+        }
 
-            var lightState = TrafficLightManager.GetLightStateGlobal(targetLightId);
+        float distanceToStopPoint = toTarget.magnitude;
 
-            if ((lightState == TrafficLightState.Red ||
-                lightState == TrafficLightState.Yellow) &&
-                toTarget.magnitude <= stopDistanceToLight)
+        // Distancia de seguridad para detectar coche adelante
+        float safeDistance = VehicleManager.Instance != null
+            ? VehicleManager.Instance.safeHeadwayDistance
+            : 4f;
+
+        bool blockedByVehicleAhead = HayVehiculoAdelante(safeDistance);
+        bool lightIsRedOrYellow = underLightControl &&
+            (lightState == TrafficLightState.Red || lightState == TrafficLightState.Yellow);
+
+        bool shouldBeInQueue = false;
+        bool mustStopForLight = false;
+
+        if (underLightControl && lightIsRedOrYellow)
+        {
+            // Coche líder en la línea de alto
+            if (distanceToStopPoint <= stopDistanceToLight)
             {
                 mustStopForLight = true;
+                shouldBeInQueue = true;
+            }
+            // Coche detrás de otro coche que también está frenado por el semáforo
+            else if (blockedByVehicleAhead)
+            {
+                shouldBeInQueue = true;
             }
         }
 
-        // Gestionar estado de espera por semáforo
-        if (mustStopForLight)
+        // Actualizar registro de cola por semáforo
+        if (shouldBeInQueue)
         {
             if (!isWaiting)
             {
@@ -338,8 +362,6 @@ public class VehicleController : MonoBehaviour
                 if (VehicleManager.Instance != null)
                     VehicleManager.Instance.RegisterWaitingVehicle(waitingLightId);
             }
-
-            return; // no avanzamos este frame
         }
         else
         {
@@ -354,14 +376,16 @@ public class VehicleController : MonoBehaviour
             }
         }
 
+        // Si somos el coche que está en la línea de alto con rojo/amarillo, no avanzamos
+        if (mustStopForLight)
+        {
+            return;
+        }
+
         // ================================
         // 2) Lógica de coche adelante
         // ================================
-        float safeDistance = VehicleManager.Instance != null
-            ? VehicleManager.Instance.safeHeadwayDistance
-            : 4f;
-
-        if (HayVehiculoAdelante(safeDistance))
+        if (blockedByVehicleAhead)
         {
             isBlockedByVehicle = true;
             return; // hay alguien enfrente, no nos movemos
@@ -372,7 +396,7 @@ public class VehicleController : MonoBehaviour
         }
 
         // ================================
-        // 3) Movimiento + NimodoQueNoFrene
+        // 3) Movimiento + AhiQuepo
         // ================================
         float distanceThisFrame = speed * Time.deltaTime;
 
@@ -413,9 +437,14 @@ public class VehicleController : MonoBehaviour
 
             if (moveDir.sqrMagnitude > 0.0001f)
             {
-                Quaternion targetRot = Quaternion.LookRotation(moveDir, Vector3.up);
-                transform.rotation = Quaternion.Slerp(transform.rotation, targetRot, rotationSpeed * Time.deltaTime);
+                Quaternion targetRot = Quaternion.Slerp(
+                    transform.rotation,
+                    Quaternion.LookRotation(moveDir, Vector3.up),
+                    rotationSpeed * Time.deltaTime
+                );
+                transform.rotation = targetRot;
             }
         }
     }
+
 }
