@@ -71,7 +71,9 @@ public class VehicleSpawner : MonoBehaviour
     private bool CanSpawnHere(Vector3 position)
     {
         // Buscamos TODOS los vehículos actuales en la escena
-        VehicleController[] vehicles = GameObject.FindObjectsOfType<VehicleController>();
+        VehicleController[] vehicles = UnityEngine.Object.FindObjectsByType<VehicleController>(
+            FindObjectsSortMode.None
+        );
 
         float minDistSq = minSpawnDistance * minSpawnDistance;
 

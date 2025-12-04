@@ -31,7 +31,10 @@ public class WaypointManager : MonoBehaviour
         waypoints.Clear();
 
         // Busca TODOS los Waypoint de la escena (aunque estén inactivos)
-        Waypoint[] all = FindObjectsOfType<Waypoint>(true);
+        Waypoint[] all = UnityEngine.Object.FindObjectsByType<Waypoint>(
+        FindObjectsSortMode.None
+        );
+
 
         foreach (var wp in all)
         {

@@ -121,6 +121,7 @@ public class TrafficLightManager : MonoBehaviour
         {
             if (managersById.ContainsKey(qLearningId))
             {
+                Debug.LogWarning($"TrafficLightManager: Ya existe un manager con qLearningId '{qLearningId}'. Reemplazando referencia.");
                 managersById[qLearningId] = this;
             }
             else
@@ -132,11 +133,17 @@ public class TrafficLightManager : MonoBehaviour
         EnsureDurationOptions();
         InitializeQTable();
 
-        // 🔧 FIX: enganchar todos los TrafficLight existentes con este qLearningId
-        AttachExistingLights();
-
         if (loadOnStart)
             LoadQTable();
+    }
+
+    private void Start()
+    {
+        // Enganchar todos los semáforos que ya existen en escena
+        AttachExistingLights();
+
+        if (autoControl)
+            StartCoroutine(ControlLoop());
     }
 
     private void OnDestroy()
@@ -179,7 +186,9 @@ public class TrafficLightManager : MonoBehaviour
     /// </summary>
     private void AttachExistingLights()
     {
-        var allLights = FindObjectsOfType<TrafficLight>(true);
+        var allLights = UnityEngine.Object.FindObjectsByType<TrafficLight>(
+            FindObjectsSortMode.None
+        );
         foreach (var tl in allLights)
         {
             if (tl == null) continue;
@@ -188,12 +197,6 @@ public class TrafficLightManager : MonoBehaviour
                 RegisterLightLocal(tl);
             }
         }
-    }
-
-    private void Start()
-    {
-        if (autoControl)
-            StartCoroutine(ControlLoop());
     }
 
     // =========================================================
@@ -265,21 +268,16 @@ public class TrafficLightManager : MonoBehaviour
         return chosenDuration;
     }
 
-
-    // Reward simple: minimizar vehículos activos (globales)
-    [Header("Recompensa")]
-    [Tooltip("Peso extra para penalizar vehículos esperando en semáforo.")]
-    public float waitingWeight = 2f;
-
+    // Reward simple: ahora solo minimiza vehículos esperando (global)
+    // Alpha también escala la penalización.
     private float ComputeReward()
     {
         if (VehicleManager.Instance != null)
         {
-            float total = VehicleManager.Instance.CurrentActiveVehicles;
             float waiting = VehicleManager.Instance.CurrentWaitingVehicles;
 
-            // Mientras más coches haya, peor. Mientras más esperando, MUCHO peor.
-            float cost = total + waitingWeight * waiting;
+            // Mientras más coches esperando haya, peor. Alpha escala la penalización.
+            float cost = alpha * waiting;
 
             return -cost;
         }
@@ -380,7 +378,6 @@ public class TrafficLightManager : MonoBehaviour
         return Path.Combine(dir, fileName);
     }
 
-
     private void SaveQTable()
     {
         if (qTable == null)
@@ -424,6 +421,7 @@ public class TrafficLightManager : MonoBehaviour
         string path = GetSavePath();
         if (!File.Exists(path))
         {
+            // Debug.Log($"No hay archivo de Q-table para {qLearningId}");
             return;
         }
 
@@ -439,7 +437,6 @@ public class TrafficLightManager : MonoBehaviour
 
             if (data.numStates != numStates || data.numActions != numActs)
             {
-                Debug.LogWarning($"Q-table guardada para '{qLearningId}' no coincide en tamaño. Ignorando archivo.");
                 return;
             }
 

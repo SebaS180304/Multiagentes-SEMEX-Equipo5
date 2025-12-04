@@ -17,6 +17,13 @@ public class VehicleController : MonoBehaviour
     [Tooltip("Distancia al punto de alto a la cual el vehículo se detiene si el semáforo está en rojo/amarillo.")]
     public float stopDistanceToLight = 2f;
 
+    [Header("Debug / Visualización")]
+    [Tooltip("Si está activado, dibuja el área de detección de vehículos en la escena.")]
+    public bool debugShowSensors = false;
+
+    [Tooltip("Escala del gizmo del sensor (1 = tamaño real, >1 más grande, <1 más pequeño).")]
+    public float debugSensorScale = 1f;
+
     // Collider del coche
     private Collider vehicleCollider;
 
@@ -27,6 +34,10 @@ public class VehicleController : MonoBehaviour
     private bool isWaiting = false;
     private string waitingLightId = null;
 
+    public bool IsWaiting => isWaiting;
+    public string WaitingLightId => waitingLightId;
+
+
     // Espera por otro vehículo
     private bool isBlockedByVehicle = false;
 
@@ -35,8 +46,8 @@ public class VehicleController : MonoBehaviour
     private bool initialized = false;
 
     /// Revisa si en la posición 'nextPosition' hay espacio para avanzar
-    /// sin chocarse con otro carro. Usa un OverlapSphere.
-    private bool AhiQuepo(Vector3 nextPosition)
+    /// sin chocarse con otro carro. Usa un OverlapSphere/Box.
+    private bool NimodoQueNoFrene(Vector3 nextPosition)
     {
         // Si no tenemos collider, usamos el método viejito con esfera
         float fallbackRadius = VehicleManager.Instance != null
@@ -78,14 +89,16 @@ public class VehicleController : MonoBehaviour
         return true;
     }
 
-
-    /// Detecta si hay un vehículo adelante en la dirección de marcha
-    /// a una cierta distancia.
+    /// Detecta si hay un vehículo adelante en la dirección de marcha,
+    /// incluyendo coches que se estén incorporando al carril.
     private bool HayVehiculoAdelante(float distance)
     {
         if (distance <= 0f)
             return false;
 
+        // -------------------------
+        // 1) Calcular origen en el "parachoques" delantero
+        // -------------------------
         Vector3 origin;
 
         if (vehicleCollider != null)
@@ -98,28 +111,120 @@ public class VehicleController : MonoBehaviour
         }
         else
         {
-            // Fallback: centro del coche si no encontramos collider
-            origin = transform.position;
+            // Fallback si no hay collider
+            origin = transform.position + transform.forward * 1f;
         }
 
-        // Un pelín arriba para evitar tocar el suelo
+        // Subimos un poco el origen para no chocar con el piso
         origin += Vector3.up * sensorHeightOffset;
 
-        Vector3 direction = transform.forward;
+        // -------------------------
+        // 2) Definir el "tubo" de detección
+        // -------------------------
+        Vector3 end = origin + transform.forward * distance;
 
-        // SphereCast desde el frente real del coche
-        if (Physics.SphereCast(origin, 0.5f, direction, out RaycastHit hit, distance, vehicleLayer))
+        // Radio del tubo: basado en el tamaño del coche, un poco inflado
+        float radius = 0.8f;
+        if (vehicleCollider != null)
         {
-            if (hit.collider != null && hit.collider.transform.root != transform.root)
-            {
-                return true;
-            }
+            float lateral = Mathf.Max(colliderHalfExtents.x, colliderHalfExtents.z);
+            radius = Mathf.Max(0.8f, lateral * 1.2f);
+        }
+
+        // -------------------------
+        // 3) OverlapCapsule para detectar cualquier coche en el tubo
+        // -------------------------
+        Collider[] hits = Physics.OverlapCapsule(origin, end, radius, vehicleLayer);
+
+        foreach (var hit in hits)
+        {
+            if (hit == null)
+                continue;
+
+            // Ignoramos nuestro propio coche
+            if (hit.transform.root == transform.root)
+                continue;
+
+            // Si hay otro coche en este volumen, lo consideramos "adelante"
+            return true;
         }
 
         return false;
     }
 
+    // ================================
+    //   GIZMOS DE DEBUG DEL SENSOR
+    // ================================
+    private void OnDrawGizmosSelected()
+    {
+#if UNITY_EDITOR
+        if (!debugShowSensors)
+            return;
 
+        // Distancia que usa el sensor (misma que en Update)
+        float safeDistance = VehicleManager.Instance != null
+            ? VehicleManager.Instance.safeHeadwayDistance
+            : 4f;
+
+        // Escala solo visual
+        safeDistance *= debugSensorScale;
+
+        // Intentar usar el collider ya cacheado; si no, buscar uno
+        Collider col = vehicleCollider != null
+            ? vehicleCollider
+            : GetComponentInChildren<Collider>();
+
+        Vector3 origin;
+
+        if (col != null)
+        {
+            Vector3 worldCenter = col.bounds.center;
+            origin = worldCenter + transform.forward * col.bounds.extents.z;
+        }
+        else
+        {
+            origin = transform.position + transform.forward * 1f;
+        }
+
+        origin += Vector3.up * sensorHeightOffset;
+        Vector3 end = origin + transform.forward * safeDistance;
+
+        float radius = 0.8f;
+        if (col != null)
+        {
+            Vector3 ext = col.bounds.extents;
+            float lateral = Mathf.Max(ext.x, ext.z);
+            radius = Mathf.Max(0.8f, lateral * 1.2f);
+        }
+
+        // Escala solo visual
+        radius *= debugSensorScale;
+
+        Gizmos.color = Color.cyan;
+        DrawCapsule(origin, end, radius);
+#endif
+    }
+
+    private void DrawCapsule(Vector3 start, Vector3 end, float radius)
+    {
+        // Esferas en los extremos
+        Gizmos.DrawWireSphere(start, radius);
+        Gizmos.DrawWireSphere(end, radius);
+
+        // Líneas laterales para sugerir el tubo
+        Vector3 dir = (end - start).normalized;
+        Vector3 up = Vector3.up * radius;
+        Vector3 right = Vector3.Cross(dir, Vector3.up).normalized * radius;
+
+        Gizmos.DrawLine(start + up, end + up);
+        Gizmos.DrawLine(start - up, end - up);
+        Gizmos.DrawLine(start + right, end + right);
+        Gizmos.DrawLine(start - right, end - right);
+    }
+
+    // ================================
+    //   RESTO DE TU CÓDIGO
+    // ================================
 
     public void SetRoute(Transform[] routePoints)
     {
@@ -142,7 +247,6 @@ public class VehicleController : MonoBehaviour
 
     private void Awake()
     {
-
         vehicleCollider = GetComponentInChildren<Collider>();
 
         if (vehicleCollider != null)
@@ -154,7 +258,6 @@ public class VehicleController : MonoBehaviour
             colliderHalfExtents = vehicleCollider.bounds.extents;
         }
     }
-
 
     private void Start()
     {
@@ -172,8 +275,6 @@ public class VehicleController : MonoBehaviour
                 VehicleManager.Instance.UnregisterWaitingVehicle(waitingLightId);
         }
     }
-
-
 
     private void Update()
     {
@@ -271,7 +372,7 @@ public class VehicleController : MonoBehaviour
         }
 
         // ================================
-        // 3) Movimiento + AhiQuepo
+        // 3) Movimiento + NimodoQueNoFrene
         // ================================
         float distanceThisFrame = speed * Time.deltaTime;
 
@@ -281,7 +382,7 @@ public class VehicleController : MonoBehaviour
             Vector3 candidatePos = target.position;
 
             // Revisar si 'quepo' en el punto antes de avanzar
-            if (!AhiQuepo(candidatePos))
+            if (!NimodoQueNoFrene(candidatePos))
             {
                 return; // hay otro coche ocupando el espacio, esperamos
             }
@@ -303,7 +404,7 @@ public class VehicleController : MonoBehaviour
             Vector3 candidatePos = transform.position + moveDir * distanceThisFrame;
 
             // Revisar si 'quepo' en la posición siguiente
-            if (!AhiQuepo(candidatePos))
+            if (!NimodoQueNoFrene(candidatePos))
             {
                 return; // espacio ocupado → esperamos
             }
@@ -317,5 +418,4 @@ public class VehicleController : MonoBehaviour
             }
         }
     }
-
 }

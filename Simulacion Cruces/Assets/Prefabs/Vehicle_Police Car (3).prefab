@@ -110,6 +110,8 @@ MonoBehaviour:
   baseSpeed: 1
   baseRotationSpeed: 1
   stopDistanceToLight: 6
+  debugShowSensors: 1
+  debugSensorScale: 1.35
 --- !u!64 &-5518829368782997799
 MeshCollider:
   m_ObjectHideFlags: 0

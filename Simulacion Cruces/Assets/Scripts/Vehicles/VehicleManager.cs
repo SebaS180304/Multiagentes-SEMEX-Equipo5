@@ -41,14 +41,16 @@ public class VehicleManager : MonoBehaviour
 
     private List<VehicleController> activeVehicles = new List<VehicleController>();
 
-
     [SerializeField, Tooltip("Solo lectura, vehículos actuales")]
     private int currentActiveVehicles = 0;
     public int CurrentActiveVehicles => currentActiveVehicles;
 
-    [SerializeField, Tooltip("Solo lectura, vehículos esperando en semáforo")]
+    [SerializeField, Tooltip("Solo lectura, vehículos esperando en semáforo (total global)")]
     private int currentWaitingVehicles = 0;
     public int CurrentWaitingVehicles => currentWaitingVehicles;
+
+    // Conteo por semáforo: lightId -> número de coches esperando en ese semáforo
+    private Dictionary<string, int> waitingByLight = new Dictionary<string, int>();
 
 
     [Header("Multiplicadores globales de velocidad")]
@@ -131,6 +133,7 @@ public class VehicleManager : MonoBehaviour
         activeVehicles.Clear();
         currentActiveVehicles = 0;
         currentWaitingVehicles = 0;
+        waitingByLight.Clear();
     }
 
 
@@ -138,15 +141,84 @@ public class VehicleManager : MonoBehaviour
     //  Espera en semáforos
     // =======================
 
+    /// <summary>
+    /// Registra que un vehículo empezó a esperar en el semáforo con ese ID.
+    /// </summary>
     public void RegisterWaitingVehicle(string lightId)
     {
-        // Por ahora solo contamos total; si luego quieres por semáforo, lo ampliamos
         currentWaitingVehicles++;
+
+        if (string.IsNullOrEmpty(lightId))
+            return;
+
+        if (!waitingByLight.TryGetValue(lightId, out int count))
+            count = 0;
+
+        waitingByLight[lightId] = count + 1;
     }
 
+    /// <summary>
+    /// Registra que un vehículo dejó de esperar en el semáforo con ese ID.
+    /// </summary>
     public void UnregisterWaitingVehicle(string lightId)
     {
         currentWaitingVehicles = Mathf.Max(0, currentWaitingVehicles - 1);
+
+        if (string.IsNullOrEmpty(lightId))
+            return;
+
+        if (waitingByLight.TryGetValue(lightId, out int count))
+        {
+            count = Mathf.Max(0, count - 1);
+            if (count == 0)
+            {
+                waitingByLight.Remove(lightId);
+            }
+            else
+            {
+                waitingByLight[lightId] = count;
+            }
+        }
+    }
+
+    
+
+    /// <summary>
+    /// Número de vehículos esperando en un semáforo específico.
+    /// </summary>
+    public int GetWaitingVehiclesForLight(string lightId)
+    {
+        if (string.IsNullOrEmpty(lightId))
+            return 0;
+
+        int count = 0;
+
+        foreach (var v in activeVehicles)
+        {
+            if (v == null) 
+                continue;
+
+            if (v.IsWaiting && v.WaitingLightId == lightId)
+                count++;
+        }
+
+        return count;
+    }
+
+    /// <summary>
+    /// Suma de vehículos esperando en una colección de semáforos.
+    /// </summary>
+    public int GetWaitingVehiclesForLights(IReadOnlyList<TrafficLight> lights)
+    {
+        if (lights == null) return 0;
+
+        int total = 0;
+        foreach (var tl in lights)
+        {
+            if (tl == null) continue;
+            total += GetWaitingVehiclesForLight(tl.lightId);
+        }
+        return total;
     }
 
     // =========================================================
